@@ -1,0 +1,256 @@
+---
+title: "STAT448 Assignment2"
+author: "Dan Wei"
+date: "2024-03-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r, eval=TRUE}
+# install package "corrplot","plotly","caret","MASS","glmnet","leaps"
+library(corrplot)
+library(plotly)
+library(caret)
+library(MASS)
+library(glmnet)
+library(leaps)
+
+```
+
+a.  
+
+```{r, eval=TRUE}
+# Load the dataset
+load("Residen.RData")
+
+# Assuming 'Residen' is correctly loaded and is a data frame or matrix suitable for correlation analysis
+correlation_matrix <- cor(Residen, use = "complete.obs")
+
+# Create a heatmap of the correlation matrix using plotly
+p <- plot_ly(x = colnames(correlation_matrix), y = rownames(correlation_matrix), z = correlation_matrix, type = "heatmap", colors = colorRamp(c("blue", "white", "yellow")))
+p <- p %>% layout(title = "Correlation Matrix Heatmap")
+p <- p %>% layout(autosize = TRUE)
+p
+
+```
+
+b.  
+
+```{r, eval=TRUE}
+# Delete V105
+Residen <- Residen[,-109]
+```
+
+```{r, eval=TRUE}
+# set seed for reproducible results. 
+set.seed(2024) 
+
+# Sample the dataset. Returns a list of row indices. 80:20 split. 
+row.number <- sample(1:nrow(Residen), 0.8*nrow(Residen)) 
+
+# create the train and test datasets. 
+train <- Residen[row.number,] 
+test <- Residen[-row.number,] 
+
+# show dimensions of the train and test sets. 
+dim(train)
+
+```
+
+```{r, eval=TRUE}
+# fit a linear model
+model <- lm(V104 ~ ., data = train)
+# View model summary
+summary(model)
+```
+
+It can be seen from the results of the model that the variables "COMPLETION YEAR","COMPLETION QUARTER","V1","V2","V3","V5","V6","V8" are relatively significant, because the p-values of these variables are less than 0.05, indicating that they have a significant linear correlation with "V104".
+
+"34 not defined because of singularities" means that the 34 coefficients cannot be estimated due to multicollinearity of the data or other reasons.
+
+Multiple R-squared: 0.9892, Adjusted R-squared: 0.9856 Indicates that the model fits well.
+
+c.  
+
+```{r, eval=TRUE}
+# Fit a linear regression model using backwards selection and stepwise selection and calculate the computation time of two models
+backwards_model_time <- system.time({
+  backwards_model <- stepAIC(model, direction = "backward")
+})
+
+stepwise_model_time <- system.time({
+  stepwise_model <- stepAIC(model, direction = "both")
+})
+```
+
+```{r, eval=TRUE}
+backwards_model_time
+stepwise_model_time
+```
+
+```{r, eval=TRUE}
+# Print out the model summary after backwards selection
+summary(backwards_model)
+# Print out the model summary after stepwise selection
+summary(stepwise_model)
+```
+
+Compare these two models in terms of outputs:
+
+Coefficients: There are 31 features in backwards_model and 34 features in the stepwise_model. The stepwise_model has more "V89","V99",but less "V62","V67".
+
+The multiple R-squared value of backwards_model is 0.9884, and the adjusted R-squared value (Adjusted R-squared) is 0.9871, which indicates that the model fit is very good and explains approximately 98.84% of the variance of variable V104.
+
+The multiple R-squared value of stepwise_model is 0.9886 and the adjusted R-squared value is 0.9872, which is slightly higher than the first model, but the difference is minimal.This shows that the second model being slightly fits better.
+
+Computational time: The computational time of backwards selection is less than stepwise selection. This is because stepwise selection takes into account not only the removal of variables but also the addition of variables, making the calculation process more complex and time-consuming.
+
+Residual standard error (Residual standard error): The residual standard errors of the two models are similar, backwards_model is 139.4 and stepwise_model is 138.9, which indicates that the fitting degrees of the two models are similar.
+
+```{r, eval=TRUE}
+# calculate holdout mean square error
+mse_backwards_model <- mean((predict(backwards_model, newdata = test) - test$V104)^2)
+mse_stepwise_model<- mean((predict(stepwise_model, newdata = test) - test$V104)^2)
+mse_backwards_model
+mse_stepwise_model
+
+```
+
+According to these two MSE values, we can see that the prediction error of stepwise_model(30459.61) on the test set is smaller than that of backwards_model(32978.89). This usually means that stepwise_model performs better on the test set because its predicted values have a smaller average difference from the actual values.
+
+```{r, eval=TRUE}
+# Custom prediction function, which can be used on regsubsets objects
+predict.regsubsets <- function(model, newdata, id, ...){
+  form <- as.formula(model$call[[2]])
+  mat <- model.matrix(form, newdata)
+  coefi <- coef(model, id=id)
+  xvars <- names(coefi)
+  mat[,xvars, drop=FALSE] %*% coefi
+}
+
+# Set cross-validation folds and seeds so that results are reproducible
+k <- 10
+set.seed(123)
+
+# Create a cross-validated folded index
+folds <- createFolds(Residen$V104, k = k)
+
+# Vector used to store the MSE of the two models
+mse_values_backwards_model <- rep(NA, k)
+mse_values_stepwise_model <- rep(NA, k)
+
+# Perform cross validation
+for(i in seq_along(folds)){
+  # Create training set and test set
+  train_indices <- folds[[i]]
+  test_indices <- setdiff(1:nrow(Residen), train_indices)
+  
+  train_data <- Residen[train_indices, ]
+  test_data <- Residen[test_indices, ]
+  
+  # Make predictions on the test set and calculate MSE
+  test_predictions_backwards_model <- predict.regsubsets(backwards_model, test_data, id=which.max(backwards_model$V104))
+  mse_values_backwards_model[i] <- mean((test_data$V104 - test_predictions_backwards_model)^2)
+  
+  test_predictions_stepwise_model <- predict.regsubsets(stepwise_model, test_data, id=which.max(stepwise_model$V104))
+  mse_values_stepwise_model[i] <- mean((test_data$V104 - test_predictions_stepwise_model)^2)
+}
+
+# Calculate the average MSE of two models
+mean_cv_mse_backwards_model <- mean(mse_values_backwards_model, na.rm = TRUE)
+mean_cv_mse_stepwise_model <- mean(mse_values_stepwise_model, na.rm = TRUE)
+
+mean_cv_mse_backwards_model
+mean_cv_mse_stepwise_model
+
+```
+
+Backward Selection's cross validation mean square error: 20485.12\
+Stepwise Selection's cross validation mean square error: 19736.03\
+The stepwise selection model performs better during cross-validation because it has a lower MSE value.
+
+d.  
+
+```{r, eval=TRUE}
+
+# create a matrix format of predictors and the response variable
+x_train <- as.matrix(train[, setdiff(names(train), "V104")])
+y_train <- train$V104
+
+# Similarly, prepare the test set
+x_test <- as.matrix(test[, setdiff(names(test), "V104")])
+y_test <- test$V104
+
+# Define a lambda sequence suitable for your data range
+lambda_sequence <- 10^seq(10, -2, length = 100)
+
+# Use cross-validation to find the optimal lambda for ridge regression on training data
+cv_ridge <- cv.glmnet(x_train, y_train, alpha = 0, lambda = lambda_sequence)
+best_lambda_ridge <- cv_ridge$lambda.min
+
+# Fit the ridge regression model using the optimal lambda found on training data
+time_ridge <- system.time({
+  ridge_model <- glmnet(x_train, y_train, alpha = 0, lambda = best_lambda_ridge)
+})
+
+# Use cross-validation to find the optimal lambda for LASSO regression on training data
+cv_lasso <- cv.glmnet(x_train, y_train, alpha = 1, lambda = lambda_sequence)
+best_lambda_lasso <- cv_lasso$lambda.min
+
+# Fit the LASSO regression model using the optimal lambda found on training data
+time_lasso <- system.time({
+  lasso_model <- glmnet(x_train, y_train, alpha = 1, lambda = best_lambda_lasso)
+})
+
+ridge_model
+lasso_model
+
+# Timing for both models
+time_ridge
+time_lasso
+
+# Generate predictions using the test predictor matrix x_test
+ridge_predictions <- predict(ridge_model, s = best_lambda_ridge, newx = x_test)
+lasso_predictions <- predict(lasso_model, s = best_lambda_lasso, newx = x_test)
+
+# Calculate MSE for both models using test data
+ridge_mse <- mean((y_test - ridge_predictions)^2)
+lasso_mse <- mean((y_test - lasso_predictions)^2)
+
+# Output MSE for both models
+ridge_mse
+lasso_mse
+```
+
+The ridge regression model selected 107 variables (Df), explained 98.72% of the variability (%Dev), and the optimal λ value was 18.74. The LASSO regression model selected 27 variables, explained 98.64% of the variability, and the optimal λ value was 3.511.
+
+The mean square error of ridge regression is 28219.13. The mean square error of LASSO regression is 29464.85.
+
+In terms of explained variability (%Dev), both models achieve very close values, indicating that they perform equally well in fitting the data.
+
+When choosing the best of these four models, we need to consider several factors:
+
+Model interpretability:
+
+Both backward selection models and stepwise selection models are based on traditional linear regression, producing models that are easy to interpret, and they select a smaller number of variables that are easy to understand. Ridge regression model and LASSO regression model adopt regularization techniques to help deal with collinearity problems, and LASSO can perform variable selection by reducing certain coefficients to zero.
+
+Model's predictive accuracy (assessed by mean squared error (MSE)):
+
+The MSE for the backward selection model is 20485.12, the MSE for the stepwise selection model is 19736.03, the MSE for ridge regression is 28219.13, and the MSE for LASSO regression is 29464.85. Among these models, the stepwise selection model has the lowest MSE, indicating that it may have the best predictive performance on the test data.
+
+Model complexity:
+
+The ridge regression model retained all variables (107), while the LASSO regression selected fewer variables (22), which shows that LASSO is more effective in reducing model complexity.
+
+calculating time:
+
+The calculation time of both ridge regression and LASSO regression is 0.02 seconds, which is faster than backward and stepwise selection.
+
+Taking the above points into consideration, if we value prediction accuracy and the size of the dataset results in computational time not being a major issue, ridge regression of the model seems to be the best option as it performs best in terms of MSE. However, if model simplicity and interpretability are more important, LASSO regression may be a better choice, albeit with a slightly higher MSE.
+
+
