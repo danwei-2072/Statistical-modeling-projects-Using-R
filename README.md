@@ -26,7 +26,7 @@ The dataset used in this project is `Residen.RData`.
 *   `Statistical_modeling_projects_using_R.Rmd`: Contains the R Markdown source code for all analysis steps, model building, and evaluation.
 *   `Statistical_modeling_projects_using_R.pdf`: The report document generated from the R Markdown file, including code, output, plots, and analysis explanations.
 *   `README.md`: This file, providing an overview and instructions for the project.
-*   (`Residen.RData`): The dataset file.
+*   `Residen.RData`: The dataset file.
 
 ## Analysis Methods & Steps
 
